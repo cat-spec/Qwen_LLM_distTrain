@@ -16,14 +16,16 @@ def parse_args():
     parser = argparse.ArgumentParser()
     #模型基本参数
     parser.add_argument('--model-path',type=str,default='./src/disttrain/model')
+    parser.add_argument('--max-length',type=int,default=512)
+    parser.add_argument('--min-prompt-length',type=int,default=128)
     #训练参数
     parser.add_argument('--lr',type=float,default=0.001)
     parser.add_argument('--batch-size',type=int,default=2)
-    parser.add_argument('--epochs',type=int,default=10)
+    parser.add_argument('--epochs',type=int,default=20)
     parser.add_argument('--seed',type=int,default=42)
     #基本输出参数
     parser.add_argument('--output-dir',type=str,default='./output/signal')
-    parser.add_argument('--resume',action='store_true',default=False)
+    parser.add_argument('--resume',action='store_true',default=True)
     #设备信息
     parser.add_argument('--device',type=str,default='cuda:0')
     parser.add_argument(
@@ -63,13 +65,13 @@ def main():
     log_dir.mkdir(exist_ok=True,parents=True)
     #初始化
     #./src/disttrain/model
-    # config=Myconfig()
+
     model_config=AutoConfig.from_pretrained(args.model_path)
     tokenizer=AutoTokenizer.from_pretrained(args.model_path)
     model=init_model(args.model_path,args)
     dataset=load_dataset('json',data_dir=str(data_dir),split='train')
-    dataset=dataset.select(range(100))
-    dataset=Mydataset(tokenizer,len(dataset),dataset)
+    dataset=dataset.select(range(1000))
+    dataset=Mydataset(tokenizer,len(dataset),dataset,args.max_length,args.min_prompt_length)
     #./output/signal/logs/signal.log
     logger=init_logger(log_dir)
     #./output/signal/metrics.csv
@@ -77,6 +79,8 @@ def main():
     logger.debug(f'model_config:{model_config.model_type},data{len(dataset)},resum{args.resume}')
     config_dist = asdict(Myconfig())
     temp_dist = {}
+    temp_dist['max_length']=args.max_length
+    temp_dist['min_prompt_length']=args.min_prompt_length
     # 初始化自己的配置类
     # config_dist={key:value for key,value in model_config}
     for key, value in model_config.to_dict().items():
@@ -101,7 +105,7 @@ def main():
             'python_version':sys.version,
         },f_json,indent=2)
     #数据加载器
-    dataloader = DataLoader(dataset,collate_fn=CollatorFn(tokenizer.pad_token_id),batch_size=args.batch_size,shuffle=True,pin_memory=True,prefetch_factor=2,num_workers=2)
+    dataloader = DataLoader(dataset,collate_fn=CollatorFn(tokenizer.pad_token_id),batch_size=args.batch_size,shuffle=True,pin_memory=True,prefetch_factor=2,num_workers=2,persistent_workers=True)
     #开启训练
     optimizer=torch.optim.Adam(model.parameters(),lr=args.lr)
     num_epochs = args.epochs
@@ -117,6 +121,7 @@ def main():
         optimizer.load_state_dict(load['optimizer'])
         scheduler.load_state_dict(load['scheduler'])
         resume_epoch = load['epoch']+1
+        print(f'开启续训练，开启轮数{resume_epoch},使用模型best.pt')
     #开启循环训练
     signal_train(args,model,optimizer,scheduler,dataloader,writer,checkpoint_dir,device,resume_epoch)
     #保存参数
