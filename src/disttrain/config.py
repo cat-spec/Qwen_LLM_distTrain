@@ -12,6 +12,8 @@ class Myconfig:
     torch_dtype:str='bfloat16'
     vocab_size:int=1024
     num_attention_heads:int=8
+    max_length:int=512
+    min_prompt_length:int=128
     num_hidden_layers:int=8
     num_key_value_heads:int=8
     rms_norm_eps:float=1e-6
