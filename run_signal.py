@@ -9,8 +9,10 @@ import torch
 from torch.utils.data import DataLoader
 
 from transformers import AutoConfig,AutoTokenizer,get_cosine_schedule_with_warmup
-from src.disttrain import Myconfig,save_model,CollatorFn,Mydataset,metrics,init_model,signal_train
+from src.disttrain import Myconfig,save_model,CollatorFn,Mydataset,metrics,init_model,signal_train,signal_benchmark
 from datasets import load_dataset
+train_file=['step','loss','lr','elapsed_time','computer_time','token_per_s','peak_alloc_GB','peak_res_GB']
+benchmark_file=['step','loss','lr','step_wall_ms','dataloader_wait_ms','h2d_ms','forward_gpu_ms','backward_gpu_ms','optimizer_gpu_ms','scheduler_cpu_ms','input_tokens_per_s','valid_input_tokens_per_s','supervised_tokens_per_s','padding_ratio','peak_alloc_GiB','peak_reserved_GiB']
 #工程化初始参数
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -26,6 +28,7 @@ def parse_args():
     #基本输出参数
     parser.add_argument('--output-dir',type=str,default='./output/signal')
     parser.add_argument('--resume',action='store_true',default=True)
+    parser.add_argument('--mode',action='store_true',default=False)
     #设备信息
     parser.add_argument('--device',type=str,default='cuda:0')
     parser.add_argument(
@@ -65,7 +68,6 @@ def main():
     log_dir.mkdir(exist_ok=True,parents=True)
     #初始化
     #./src/disttrain/model
-
     model_config=AutoConfig.from_pretrained(args.model_path)
     tokenizer=AutoTokenizer.from_pretrained(args.model_path)
     model=init_model(args.model_path,args)
@@ -75,7 +77,7 @@ def main():
     #./output/signal/logs/signal.log
     logger=init_logger(log_dir)
     #./output/signal/metrics.csv
-    writer,f=metrics(output/'metrics.csv',args)
+    writer,f=metrics(output/'metrics.csv',args,train_file)
     logger.debug(f'model_config:{model_config.model_type},data{len(dataset)},resum{args.resume}')
     config_dist = asdict(Myconfig())
     temp_dist = {}
@@ -113,18 +115,30 @@ def main():
     scheduler=get_cosine_schedule_with_warmup(
     optimizer,num_warmup_steps=int(0.03 * total_steps),   # 前 3% 步数预热
     num_training_steps=total_steps)
-    # 续训练
-    resume_epoch=0
-    if args.resume:
-        load=torch.load(checkpoint_dir/'best.pt')
-        model.load_state_dict(load['model'])
-        optimizer.load_state_dict(load['optimizer'])
-        scheduler.load_state_dict(load['scheduler'])
-        resume_epoch = load['epoch']+1
-        print(f'开启续训练，开启轮数{resume_epoch},使用模型best.pt')
-    #开启循环训练
-    signal_train(args,model,optimizer,scheduler,dataloader,writer,checkpoint_dir,device,resume_epoch)
-    #保存参数
-    save_model(model,optimizer,scheduler,checkpoint_dir/'last.pt',args.epochs)
+    if args.mode:
+        # 续训练
+        resume_epoch = 0
+        if args.resume:
+            load = torch.load(checkpoint_dir / 'best.pt')
+            model.load_state_dict(load['model'])
+            optimizer.load_state_dict(load['optimizer'])
+            scheduler.load_state_dict(load['scheduler'])
+            resume_epoch = load['epoch'] + 1
+            print(f'开启续训练，开启轮数{resume_epoch},使用模型best.pt')
+        # 开启循环训练
+        signal_train(args, model, optimizer, scheduler, dataloader, writer, checkpoint_dir, device, resume_epoch)
+        # 保存参数
+        save_model(model, optimizer, scheduler, checkpoint_dir / 'last.pt', args.epochs)
+    else:
+        # benchmark
+        benchmark_dir = output / 'benchmark'
+        benchmark_dir.mkdir(exist_ok=True, parents=True)
+        benchmark_write, benchmarkfile = metrics(benchmark_dir / 'benchmark.csv', args, benchmark_file)
+        warmup_steps = 5
+        bench_steps = 50
+        signal_benchmark(args, model, optimizer, scheduler, dataloader, benchmark_write, benchmark_dir, device,
+                         warmup_steps, bench_steps)
+
+
 if '__main__' == __name__:
     main()

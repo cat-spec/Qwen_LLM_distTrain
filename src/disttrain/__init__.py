@@ -5,3 +5,5 @@ from .trainer import signal_train
 from .model import init_model
 from .checkpoint import save_model
 from .config import Myconfig
+from .benchmark import signal_benchmark
+from .args import parse_args

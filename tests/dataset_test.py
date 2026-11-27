@@ -2,7 +2,7 @@ from pathlib import Path
 from datasets import load_dataset
 from torch.cuda import device
 
-from src.disttrain import Mydataset,collate
+from src.disttrain import Mydataset,CollatorFn
 from transformers import AutoTokenizer
 from torch.utils.data import DataLoader
 #加载数据
@@ -15,7 +15,7 @@ tokenizer_dir=Path(__file__).parent.parent/'src/disttrain/model'
 tokenizer=AutoTokenizer.from_pretrained(str(tokenizer_dir))
 print(f"Dataset{dataset}")
 #自定义dataset类
-dataset=Mydataset(tokenizer=tokenizer,total_sample=dataset.num_rows,dataset=dataset)
+dataset=Mydataset(tokenizer=tokenizer,total_sample=dataset.num_rows,dataset=dataset,max_length=512,min_prompt_length=128)
 
 for index,item in enumerate(dataset):
     value=tokenizer(data[index]['output'])['input_ids']
@@ -33,7 +33,8 @@ for index,item in enumerate(dataset):
     #eos所以+1
     if len(value)+1!=value_num:
         raise ValueError(f"逻辑错误，有效token数量不对")
-dataloader=DataLoader(dataset,collate_fn=lambda batch:collate(batch,token_pad=tokenizer.pad_token_id),batch_size=2)
+dataloader=DataLoader(dataset,collate_fn=CollatorFn(tokenizer.pad_token_id),batch_size=2)
+print(len(dataloader))
 for index,item in enumerate(dataloader):
     batch={k:v.to(device) for k,v in item.items()}
 print('验证通过')
